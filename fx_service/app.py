@@ -8,7 +8,7 @@ from databases import Database
 from mode import Service
 from mode.utils.objects import cached_property
 
-from fx_service.config import DATABASE_URL
+from fx_service.config import DATABASE_URL, PULL_INTERVAL_SECONDS
 from fx_service.provider import (
     Fx1Forge,
     get_currency_pairs_data,
@@ -46,7 +46,7 @@ class App(Service):
     async def get_fx_symbols(self):
         return await self.redis.smembers("fx_symbols", encoding="utf-8")
 
-    @Service.timer(60.0)
+    @Service.timer(PULL_INTERVAL_SECONDS)
     async def get_fx_quotes(self) -> None:
         self.logger.info("Getting latest fx quotes...")
         symbols = await self.get_fx_symbols()
