@@ -1,12 +1,11 @@
-import asyncio
 import json
 from typing import List
 
-import aioredis
-from aioredis import Redis
-from databases import Database
-from mode import Service
-from mode.utils.objects import cached_property
+from loguru import logger
+from redis import StrictRedis
+import rx
+from rx.concurrency import ThreadPoolScheduler
+import rx.operators as op
 
 from fx_service.config import DATABASE_URL, PULL_INTERVAL_SECONDS
 from fx_service.provider import (
@@ -15,51 +14,25 @@ from fx_service.provider import (
     save_quotes_to_timescaledb,
 )
 
-loop = asyncio.get_event_loop()
+redis_client = StrictRedis(decode_responses=True)
 
 
-class App(Service):
-    db: Database = None
-    redis: Redis = None
-
-    async def on_start(self) -> None:
-        await self.db.connect()
-        try:
-            self.redis = await aioredis.create_redis("redis://localhost", loop=loop)
-        except Exception as e:
-            self.logger.critical("No connection to redis!")
-            await self.stop()
-        # self.symbols = await Fx1Forge.get_symbols()
-
-    async def on_stop(self) -> None:
-        await self.db.disconnect()
-        self.logger.info("Connection to timescaledb closed.")
-
-        if self.redis:
-            self.redis.close()
-            await self.redis.wait_closed()
-
-    @cached_property
-    def db(self) -> Database:
-        return Database(DATABASE_URL)
-
-    async def get_fx_symbols(self):
-        return await self.redis.smembers("fx_symbols", encoding="utf-8")
-
-    @Service.timer(PULL_INTERVAL_SECONDS)
-    async def get_fx_quotes(self) -> None:
-        self.logger.info("Getting latest fx quotes...")
-        symbols = await self.get_fx_symbols()
-        quotes = await Fx1Forge.get_quotes(symbols)
-        # Save data to timescaledb
-        await save_quotes_to_timescaledb(quotes, self.db)
-        self.logger.info("Latest fx quotes saved to timescaledb.")
-        # Save data to redis
-        await self.redis.set("fx_quotes", json.dumps(quotes))
-        self.logger.info("Latest fx quotes saved to redis.")
+def get_fx_symbols():
+    return redis_client.smembers("fx_symbols")
 
 
-if __name__ == "__main__":
-    from mode import Worker
+def get_fx_quotes() -> None:
+    logger.info("Getting latest fx quotes...")
+    symbols = get_fx_symbols()
+    quotes = Fx1Forge.get_quotes(symbols)
+    # Save data to timescaledb
+    save_quotes_to_timescaledb(quotes)
+    logger.info("Latest fx quotes saved to timescaledb.")
+    # Save data to redis
+    redis_client.set("fx_quotes", json.dumps(quotes))
+    logger.info("Latest fx quotes saved to redis.")
 
-    Worker(App(), loglevel="info", daemon=True).execute_from_commandline()
+
+scheduler = ThreadPoolScheduler()
+rx.timer(0, 60.0, scheduler=scheduler).subscribe_(lambda x: get_fx_quotes())
+

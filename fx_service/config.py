@@ -1,6 +1,8 @@
-import environs
 import pathlib
+
 from loguru import logger
+
+import environs
 
 env = environs.Env()
 basedir = pathlib.Path(__file__).parent

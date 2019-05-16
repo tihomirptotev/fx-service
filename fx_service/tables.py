@@ -1,5 +1,7 @@
 import sqlalchemy
 
+from fx_service.config import DATABASE_URL
+
 metadata = sqlalchemy.MetaData()
 
 rm_fx_quote = sqlalchemy.Table(
@@ -11,3 +13,10 @@ rm_fx_quote = sqlalchemy.Table(
     sqlalchemy.Column("price", sqlalchemy.Float),
     sqlalchemy.Column("timestamp", sqlalchemy.TIMESTAMP(timezone=True)),
 )
+
+
+def insert_fx_quotes(values):
+    engine = sqlalchemy.create_engine(DATABASE_URL)
+    query = rm_fx_quote.insert()
+    with engine.connect() as conn:
+        conn.execute(query, values)
